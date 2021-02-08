@@ -24,7 +24,7 @@ install_requires = [
 
 setup(
     name="petfinder-client",
-    version="0.0.1",
+    version="0.0.2",
     description="Petfinder API client",
     license="MIT",
     long_description=readme(),

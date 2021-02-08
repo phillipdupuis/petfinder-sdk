@@ -54,7 +54,9 @@ class Client(BaseClient):
         Sets up the httpx client
         """
         return httpx.Client(
-            base_url=self._base_url, headers=self._authorization_headers
+            base_url=self._base_url,
+            headers=self._authorization_headers,
+            proxies=self._proxies,
         )
 
     def _get(self, path: str, **params) -> dict:
@@ -95,7 +97,9 @@ class AsyncClient(BaseClient):
         Sets up the httpx async client
         """
         return httpx.AsyncClient(
-            base_url=self._base_url, headers=self._authorization_headers
+            base_url=self._base_url,
+            headers=self._authorization_headers,
+            proxies=self._proxies,
         )
 
     async def _get(self, path: str, **params) -> dict:
