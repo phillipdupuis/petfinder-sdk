@@ -1,32 +1,69 @@
-import abc
-from typing import List
+from typing import Generic, Optional, Callable
 
 import httpx
 from httpx._types import ProxiesTypes
 
-from petfinder.models import AnimalQuery
+from petfinder.animals import AnimalsQuery
+from petfinder.cache import ResponseCache
+from petfinder.enums import Category
+from petfinder.query import Query
+from petfinder.static_data import StaticData, CategoryData
+from petfinder.types import HttpClient
 
 
-class BaseClient(abc.ABC):
-    _base_url: str
+class PetfinderClient(Generic[HttpClient]):
+    animals: AnimalsQuery
+    async_: bool
+    response_cache: Optional[ResponseCache]
+    static_data: StaticData
+    http_client: Callable[[], HttpClient]
+
     _api_secret: str
     _api_key: str
-    _authorization_headers: dict
+    _base_url: str
     _proxies: ProxiesTypes
+    _authorization_headers: dict
 
     def __init__(
         self,
         *,
         api_secret: str,
         api_key: str,
+        async_: bool = False,
+        response_cache: Optional[ResponseCache] = None,
         proxies: ProxiesTypes = None,
         base_url: str = "https://api.petfinder.com/v2",
     ) -> None:
+        self.async_ = async_
+        self.http_client = self._async_client if async_ else self._client
+        self.response_cache = response_cache
         self._api_secret = api_secret
         self._api_key = api_key
         self._proxies = proxies
         self._base_url = base_url
         self._refresh_access_token()
+        self._initialize_static_data()
+        self.animals = AnimalsQuery(
+            async_=async_,
+            get_client=self.http_client,
+            refresh_access_token=self._refresh_access_token,
+            response_cache=self.response_cache,
+            static_data=self.static_data,
+        )
+
+    def _client(self) -> httpx.Client:
+        return httpx.Client(
+            base_url=self._base_url,
+            headers=self._authorization_headers,
+            proxies=self._proxies,
+        )
+
+    def _async_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            base_url=self._base_url,
+            headers=self._authorization_headers,
+            proxies=self._proxies,
+        )
 
     def _refresh_access_token(self) -> None:
         """
@@ -43,92 +80,28 @@ class BaseClient(abc.ABC):
         )
         response.raise_for_status()
         token = response.json()["access_token"]
-        c = httpx.Client()
-        c.close()
         self._authorization_headers = {"Authorization": f"Bearer {token}"}
 
-
-class Client(BaseClient):
-    def _client(self) -> httpx.Client:
+    def _initialize_static_data(self) -> None:
         """
-        Sets up the httpx client
+        Sets up static data (types, breeds, etc) so other parts of the client can rely on that
+        data being available. This helps quite a bit with performance and reducing API calls.
         """
-        return httpx.Client(
-            base_url=self._base_url,
-            headers=self._authorization_headers,
-            proxies=self._proxies,
+        q = Query(
+            path="",
+            async_=False,
+            get_client=self._client,
+            refresh_access_token=self._refresh_access_token,
+            response_cache=self.response_cache,
         )
-
-    def _get(self, path: str, **params) -> dict:
-        """
-        Performs a GET request to the petfinder API.
-
-        If the request fails due to an authentication error (401) we assume
-        that the token has simply expired, so we refresh it and then call
-        this function again.
-        """
-        try:
-            with self._client() as client:
-                response = client.get(path, params=params)
-                response.raise_for_status()
-                return response.json()
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 401:
-                self._refresh_access_token()
-                return self._get(path, **params)
-            else:
-                raise e
-
-    def get_animals(
-        self, query: AnimalQuery = None, require_photos: bool = False
-    ) -> List[dict]:
-        """
-        Retrieves a page of animals satisfying the given constraints
-        """
-        params = query.dict() if query else {}
-        data = self._get(path="animals", **params)
-        animals = data["animals"]
-        return [a for a in animals if a.get("photos")] if require_photos else animals
-
-
-class AsyncClient(BaseClient):
-    def _client(self) -> httpx.AsyncClient:
-        """
-        Sets up the httpx async client
-        """
-        return httpx.AsyncClient(
-            base_url=self._base_url,
-            headers=self._authorization_headers,
-            proxies=self._proxies,
-        )
-
-    async def _get(self, path: str, **params) -> dict:
-        """
-        Performs a GET request to the petfinder API.
-
-        If the request fails due to an authentication error (401) we assume
-        that the token has simply expired, so we refresh it and then call
-        this function again.
-        """
-        try:
-            async with self._client() as client:
-                response = await client.get(path, params=params)
-                response.raise_for_status()
-                return response.json()
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 401:
-                self._refresh_access_token()
-                return await self._get(path, **params)
-            else:
-                raise e
-
-    async def get_animals(
-        self, query: AnimalQuery = None, require_photos: bool = False
-    ) -> List[dict]:
-        """
-        Retrieves a page of animals satisfying the given constraints
-        """
-        params = query.dict() if query else {}
-        data = await self._get(path="animals", **params)
-        animals = data["animals"]
-        return [a for a in animals if a.get("photos")] if require_photos else animals
+        data = {}
+        for c in list(Category):
+            types_response = q._new_query(path=f"types/{c}").execute()
+            breeds_response = q._new_query(path=f"types/{c}/breeds").execute()
+            data[c] = CategoryData(
+                breeds=set(x["name"].lower() for x in breeds_response["breeds"]),
+                coats=set(x.lower() for x in types_response["type"]["coats"]),
+                colors=set(x.lower() for x in types_response["type"]["colors"]),
+                genders=set(x.lower() for x in types_response["type"]["genders"]),
+            )
+        self.static_data = StaticData(data)

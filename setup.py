@@ -20,12 +20,13 @@ classifiers = [
 install_requires = [
     "httpx",
     "pydantic",
+    "typing_extensions",
 ]
 
 setup(
-    name="petfinder-client",
-    version="0.0.2",
-    description="Petfinder API client",
+    name="petfinder-sdk",
+    version="0.0.1",
+    description="Petfinder API SDK",
     license="MIT",
     long_description=readme(),
     long_description_content_type="text/markdown",

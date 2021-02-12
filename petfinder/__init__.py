@@ -1,10 +1,4 @@
-from petfinder.client import Client, AsyncClient
-from petfinder.models import (
-    AnimalQuery,
-    AnimalType,
-    AnimalSize,
-    AnimalGender,
-    AnimalStatus,
-    AnimalAge,
-    AnimalCoat,
-)
+# from petfinder.client import Client, AsyncClient
+from petfinder import enums
+
+# from petfinder.models import Query
