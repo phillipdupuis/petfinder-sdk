@@ -19,7 +19,7 @@ class Pagination(TypedDict):
     count_per_page: int
     total_count: int
     current_page: int
-    total_page: int
+    total_pages: int
     _links: Optional[PrevNextLinks]
 
 

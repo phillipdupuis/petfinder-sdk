@@ -1,16 +1,12 @@
-import httpx
 from typing import Union, Awaitable, TypeVar
+
 from typing_extensions import Literal
+
 from petfinder import enums
 
 T = TypeVar("T")
 
 MaybeAwaitable = Union[T, Awaitable[T]]
-
-HttpClient = TypeVar("HttpClient", httpx.Client, httpx.AsyncClient)
-
-# TODO: Are we sure pycharm can't do type-checking for enums properly?
-# Will need to add some tests to make sure the types and the enums are always in sync.
 
 AgeType = Union[enums.Age, Literal["baby", "young", "adult", "senior"]]
 

@@ -1,17 +1,16 @@
-import json
-from typing import List, Callable, Set
+from math import ceil
+from typing import List, Set, TypeVar, Literal, Union, NamedTuple, Dict, ClassVar
 
+import pandas as pd
 from pydantic.class_validators import root_validator
 from pydantic.fields import Field
 from pydantic.types import conint, PositiveInt
-import pandas as pd
 
 from petfinder.enums import Category, Age, Gender, Coat, Status, Size, Sort
+from petfinder.pandas_utils import animals_dataframe, photos_dataframe, tags_dataframe
 from petfinder.query import Query, QueryParams
 from petfinder.schemas import Animal, AnimalsResponse
-from petfinder.static_data import StaticData
 from petfinder.types import (
-    MaybeAwaitable,
     AgeType,
     GenderType,
     CoatType,
@@ -19,6 +18,18 @@ from petfinder.types import (
     SizeType,
     SortType,
 )
+
+T = TypeVar("T")
+
+
+class PandasResults(NamedTuple):
+    animals: pd.DataFrame
+    photos: pd.DataFrame
+    tags: pd.DataFrame
+
+
+Format = Literal["pages", "records", "pandas"]
+SearchResults = Union[List[AnimalsResponse], List[Animal], PandasResults]
 
 
 class InvalidChoice(ValueError):
@@ -41,7 +52,7 @@ class MissingAnimalType(Exception):
             (
                 f"{method_call} can not be invoked until an animal type has been defined.\n"
                 f"A type can be defined by chaining one of the following:\n"
-                f".dogs, .puppies, .cats, .kittens, .birds, .rabbits, .horses, .barnyard, .scales_fins_other"
+                f".dogs, .puppies, .cats, .kittens, .small_furry, .birds, .rabbits, .horses, .barnyard, .scales_fins_other"
             )
         )
 
@@ -74,98 +85,96 @@ class AnimalQueryParams(QueryParams):
             if values.get("sort") in (Sort.distance, Sort.reverse_distance):
                 raise MissingDependency(f"'sort = {values['sort']}'", "location")
 
-        sd: StaticData = values.pop("__static_data__")
+        query: AnimalsQuery = values["__query__"]
 
-        if values.get("type"):
-            type_ = values["type"]
+        if values.get("type") and values.get("breed"):
+            valid_breeds = query.get_breeds()
+            for breed in values["breed"]:
+                if breed.lower() not in valid_breeds:
+                    raise InvalidChoice("breed", breed, valid_breeds)
 
-            if values.get("breed"):
-                valid_breeds = sd.get_breeds(type_)
-                for breed in values["breed"]:
-                    if breed.lower() not in valid_breeds:
-                        raise InvalidChoice("breed", breed, valid_breeds)
-
-            if values.get("color"):
-                valid_colors = sd.get_colors(type_)
-                for color in values["color"]:
-                    if color.lower() not in valid_colors:
-                        raise InvalidChoice("color", color, valid_colors)
+        if values.get("type") and values.get("color"):
+            valid_colors = query.get_colors()
+            for color in values["color"]:
+                if color.lower() not in valid_colors:
+                    raise InvalidChoice("color", color, valid_colors)
 
         return values
 
 
 class AnimalsQuery(Query[AnimalsResponse]):
     params_class = AnimalQueryParams
-    search: Callable[[], MaybeAwaitable[List[Animal]]]
-
-    def __init__(self, **kwargs):
-        kwargs.setdefault("path", "animals")
-        super().__init__(**kwargs)
-        self.search = self._search_async if self._async else self._search
+    # Breeds and colors don't change, so we'll keep them cached as a class variable
+    _cached_breeds: ClassVar[Dict[Category, Set[str]]] = {}
+    _cached_colors: ClassVar[Dict[Category, Set[str]]] = {}
 
     @property
-    def dogs(self):
+    def dogs(self: T) -> T:
         return self._chain(type=Category.dog)
 
     @property
-    def puppies(self):
-        return self._chain(type=Category.dog, age=Age.baby)
+    def puppies(self: T) -> T:
+        return self._chain(type=Category.dog, age=[Age.baby])
 
     @property
-    def cats(self):
+    def cats(self: T) -> T:
         return self._chain(type=Category.cat)
 
     @property
-    def kittens(self):
-        return self._chain(type=Category.cat, age=Age.baby)
+    def kittens(self: T) -> T:
+        return self._chain(type=Category.cat, age=[Age.baby])
 
     @property
-    def birds(self):
+    def small_furry(self: T) -> T:
+        return self._chain(type=Category.small_furry)
+
+    @property
+    def birds(self: T) -> T:
         return self._chain(type=Category.bird)
 
     @property
-    def rabbits(self):
+    def rabbits(self: T) -> T:
         return self._chain(type=Category.rabbit)
 
     @property
-    def horses(self):
+    def horses(self: T) -> T:
         return self._chain(type=Category.horse)
 
     @property
-    def barnyard(self):
+    def barnyard(self: T) -> T:
         return self._chain(type=Category.barnyard)
 
     @property
-    def scales_fins_other(self):
+    def scales_fins_other(self: T) -> T:
         return self._chain(type=Category.scales_fins_other)
 
     def filter(
-        self,
+        self: T,
         *,
         status: StatusType = None,
-        age: List[AgeType] = None,
-        size: List[SizeType] = None,
-        gender: List[GenderType] = None,
-        breed: List[str] = None,
-        coat: List[CoatType] = None,
-        color: List[str] = None,
-        organization: List[str] = None,
+        ages: List[AgeType] = None,
+        sizes: List[SizeType] = None,
+        genders: List[GenderType] = None,
+        breeds: List[str] = None,
+        coats: List[CoatType] = None,
+        colors: List[str] = None,
+        organizations: List[str] = None,
         location: str = None,
         distance: int = None,
         name: str = None,
-    ):
+    ) -> T:
         return self._chain(
             **{
                 k: v
                 for k, v in (
                     ("status", status),
-                    ("age", age),
-                    ("size", size),
-                    ("gender", gender),
-                    ("breed", breed),
-                    ("coat", coat),
-                    ("color", color),
-                    ("organization", organization),
+                    ("age", ages),
+                    ("size", sizes),
+                    ("gender", genders),
+                    ("breed", breeds),
+                    ("coat", coats),
+                    ("color", colors),
+                    ("organization", organizations),
                     ("location", location),
                     ("distance", distance),
                     ("name", name),
@@ -174,118 +183,76 @@ class AnimalsQuery(Query[AnimalsResponse]):
             }
         )
 
-    def limit(self, value: int) -> "AnimalsQuery":
+    def limit(self: T, value: int) -> T:
         return self._chain(limit=value)
 
-    def sort_by(self, value: SortType) -> "AnimalsQuery":
+    def sort_by(self: T, value: SortType) -> T:
         return self._chain(sort=value)
 
-    def page(self, number: int) -> "AnimalsQuery":
+    def page(self: T, number: int) -> T:
         return self._chain(page=number)
 
-    def breeds(self) -> Set[str]:
-        if not self.params.get("type"):
+    def get_breeds(self) -> Set[str]:
+        """
+        Returns a set of the breeds for a type of animal
+        """
+        t = self.params.get("type")
+        if not t:
             raise MissingAnimalType(method_call=".breeds()")
-        return self._static_data.get_breeds(self.params["type"])
+        elif t not in self._cached_breeds:
+            query: Query[dict] = self.new_query(path=f"types/{t}/breeds")
+            self._cached_breeds[t] = set(
+                x["name"].lower() for x in query.execute()["breeds"]
+            )
+        return self._cached_breeds[t]
 
-    def colors(self) -> Set[str]:
-        if not self.params.get("type"):
+    def get_colors(self) -> Set[str]:
+        """
+        Returns a set of the colors for a type of animal
+        """
+        t = self.params.get("type")
+        if not t:
             raise MissingAnimalType(method_call=".colors()")
-        return self._static_data.get_colors(self.params["type"])
+        elif t not in self._cached_colors:
+            query: Query[dict] = self.new_query(path=f"types/{t}")
+            self._cached_colors[t] = set(
+                x.lower() for x in query.execute()["type"]["colors"]
+            )
+        return self._cached_colors[t]
 
-    def _format_search_results(self, results: AnimalsResponse) -> List[Animal]:
-        # animal = results["animals"][0]
-        return results["animals"]
+    def get_total_count(self) -> int:
+        """
+        Returns the total number of animals which exist for this query.
+        This is only intended to serve as a convenience function for debugging or exploring.
+        """
+        return self.execute()["pagination"]["total_count"]
 
-    def _search(self) -> List[Animal]:
-        return self._format_search_results(self.execute())
+    def get_total_pages(self) -> int:
+        """
+        Returns the total number of pages which exist for this query.
+        """
+        return self.execute()["pagination"]["total_pages"]
 
-    async def _search_async(self) -> List[Animal]:
-        return self._format_search_results(await self.execute())
+    async def search(
+        self, *, format: Format = "records", limit: int = 100, start_page: int = 1,
+    ) -> SearchResults:
+        """
+        Performs a search asynchronously and formats the results.
+        """
+        num_pages = ceil(limit / 100)
+        queries = [self.page(n).limit(100) for n in range(start_page, num_pages + 1)]
+        results = await self.async_batch_executor(queries)
 
-    async def big_dump(self):
-        records = []
-
-        for n in range(1, 200):
-            print(f"Page {n}")
-            data = await self.page(n).execute()
-            records.extend(data["animals"])
-
-        path = f"/Users/phillipdupuis/repos/petfinder-client/response_data/BIG_DUMP_2021_02_11.json"
-        with open(path, "w") as f:
-            json.dump(records, f)
-        print("SAVED!")
-
-
-# class Animal(TypedDict):
-# id: int
-# organization_id: str
-# url: str
-# type: str
-# species: Optional[str]
-# breeds: Breeds
-# colors: Colors
-# age: Optional[str]
-# gender: Optional[str]
-# size: Optional[str]
-# coat: Optional[str]
-# attributes: Attributes
-# environment: Environmen
-# name: str
-# description: Optional[str]
-
-# tags: List[str]
-# photos: List[Photo]
-# primary_photo_cropped: Optional[Photo]
-# contact: Contact
-# _links: AnimalLinks
-
-
-def _animals_dataframe(records: List[Animal]):
-    animals = pd.DataFrame(
-        [
-            {
-                "id": x["id"],
-                "name": x["name"],
-                "type": x["type"],
-                "status": x["status"],
-                "organization_id": x["organization_id"],
-                "species": x.get("species"),
-                "age": x.get("age"),
-                "gender": x.get("gender"),
-                "size": x.get("size"),
-                "coat": x.get("coat"),
-                "published_at": x.get("published_at"),
-                "status_changed_at": x.get("status_changed_at"),
-                "breed_primary": x["breeds"].get("primary"),
-                "breed_secondary": x["breeds"].get("secondary"),
-                "breed_mixed": x["breeds"].get("mixed"),
-                "breed_unknown": x["breeds"].get("unknown"),
-                "color_primary": x["colors"].get("primary"),
-                "color_secondary": x["colors"].get("secondary"),
-                "color_tertiary": x["colors"].get("tertiary"),
-                "spayed_neutered": x["attributes"]["spayed_neutered"],
-                "house_trained": x["attributes"]["house_trained"],
-                "special_needs": x["attributes"]["special_needs"],
-                "shots_current": x["attributes"]["shots_current"],
-                "declawed": x["attributes"].get("declawed"),
-                "good_with_children": x["environment"].get("children"),
-                "good_with_dogs": x["environment"].get("dogs"),
-                "good_with_cats": x["environment"].get("cats"),
-                "description": x.get("description"),
-                "url": x["url"],
-            }
-            for x in records
-        ]
-    )
-    animals["id"] = animals["id"].astype(int)
-    animals["published_at"] = pd.to_datetime(animals["published_at"])
-    animals["status_changed_at"] = pd.to_datetime(animals["status_changed_at"])
-    return animals
-
-
-# def _tags_dataframe(records: List[Animal]):
-#     pass
-#
-#
-# def _
+        if format == "pages":
+            return list(results)
+        elif format == "records":
+            return [record for page in results for record in page["animals"]][:limit]
+        elif format == "pandas":
+            records = [record for page in results for record in page["animals"]][:limit]
+            return PandasResults(
+                animals=animals_dataframe(records),
+                photos=photos_dataframe(records),
+                tags=tags_dataframe(records),
+            )
+        else:
+            raise Exception(f"{format} is not a valid format")
