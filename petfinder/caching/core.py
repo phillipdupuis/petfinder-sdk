@@ -1,9 +1,10 @@
 import abc
-import os
 import pickle
 import time
+from pathlib import Path
 from typing import Callable, Union, TypedDict, TypeVar, NamedTuple
 
+import appdirs
 from httpx import Request, Response, Headers, URL
 
 T = TypeVar("T")
@@ -28,22 +29,21 @@ def default_ttl_callback(request: CachedRequest) -> TimeToLive:
     """
     Default behavior for determining how long to cache responses.
     API resources that never really change are kept for a week,
-    everything else is kept for an hour.
+    everything else is kept for a day.
     """
     if request.url.path.startswith("/v2/types"):
         return 604800
-    return 3600
+    return 86400
 
 
 def data_directory() -> str:
     """
     Returns the default directory that should be used for storing cached data.
     """
-    this_dir = os.path.dirname(os.path.realpath(__file__))
-    data_dir = os.path.join(this_dir, "data")
-    if not os.path.exists(data_dir):
-        os.mkdir(data_dir)
-    return data_dir
+    path = Path(appdirs.user_cache_dir("petfinder-sdk"))
+    if not path.exists():
+        path.mkdir(exist_ok=True, parents=True)
+    return path.as_posix()
 
 
 class RequestsCache:

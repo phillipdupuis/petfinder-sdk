@@ -7,6 +7,7 @@ import httpx
 
 from petfinder.animals import AnimalsQuery
 from petfinder.auth import TokenAuth
+from petfinder.enums import Category, Age
 from petfinder.caching import RequestsCache, CachedResponse
 from petfinder.query import Query
 
@@ -41,6 +42,46 @@ class PetfinderClient:
             async_executor=self.async_fetch,
             async_batch_executor=self.async_fetch_many,
         )
+
+    @property
+    def dogs(self) -> AnimalsQuery:
+        return self.animals._chain(type=Category.dog)
+
+    @property
+    def puppies(self) -> AnimalsQuery:
+        return self.animals._chain(type=Category.dog, age=[Age.baby])
+
+    @property
+    def cats(self) -> AnimalsQuery:
+        return self.animals._chain(type=Category.cat)
+
+    @property
+    def kittens(self) -> AnimalsQuery:
+        return self.animals._chain(type=Category.cat, age=[Age.baby])
+
+    @property
+    def small_furry(self) -> AnimalsQuery:
+        return self.animals._chain(type=Category.small_furry)
+
+    @property
+    def birds(self) -> AnimalsQuery:
+        return self.animals._chain(type=Category.bird)
+
+    @property
+    def rabbits(self) -> AnimalsQuery:
+        return self.animals._chain(type=Category.rabbit)
+
+    @property
+    def horses(self) -> AnimalsQuery:
+        return self.animals._chain(type=Category.horse)
+
+    @property
+    def barnyard(self) -> AnimalsQuery:
+        return self.animals._chain(type=Category.barnyard)
+
+    @property
+    def scales_fins_other(self) -> AnimalsQuery:
+        return self.animals._chain(type=Category.scales_fins_other)
 
     def fetch(self, query: Query[T], client: httpx.Client = None) -> T:
         """

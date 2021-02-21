@@ -18,7 +18,9 @@ classifiers = [
 ]
 
 install_requires = [
+    "appdirs",
     "httpx",
+    "pandas",
     "pydantic",
     "typing_extensions",
 ]

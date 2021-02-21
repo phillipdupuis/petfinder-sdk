@@ -1,5 +1,13 @@
+import asyncio
 from math import ceil
-from typing import List, Set, TypeVar, Literal, Union, NamedTuple, Dict, ClassVar
+from typing import (
+    List,
+    Set,
+    TypeVar,
+    Dict,
+    ClassVar,
+    Iterable,
+)
 
 import pandas as pd
 from pydantic.class_validators import root_validator
@@ -7,7 +15,7 @@ from pydantic.fields import Field
 from pydantic.types import conint, PositiveInt
 
 from petfinder.enums import Category, Age, Gender, Coat, Status, Size, Sort
-from petfinder.pandas_utils import animals_dataframe, photos_dataframe, tags_dataframe
+from petfinder.pandas import animals_dataframe, photos_dataframe, tags_dataframe
 from petfinder.query import Query, QueryParams
 from petfinder.schemas import Animal, AnimalsResponse
 from petfinder.types import (
@@ -20,16 +28,6 @@ from petfinder.types import (
 )
 
 T = TypeVar("T")
-
-
-class PandasResults(NamedTuple):
-    animals: pd.DataFrame
-    photos: pd.DataFrame
-    tags: pd.DataFrame
-
-
-Format = Literal["pages", "records", "pandas"]
-SearchResults = Union[List[AnimalsResponse], List[Animal], PandasResults]
 
 
 class InvalidChoice(ValueError):
@@ -107,46 +105,6 @@ class AnimalsQuery(Query[AnimalsResponse]):
     # Breeds and colors don't change, so we'll keep them cached as a class variable
     _cached_breeds: ClassVar[Dict[Category, Set[str]]] = {}
     _cached_colors: ClassVar[Dict[Category, Set[str]]] = {}
-
-    @property
-    def dogs(self: T) -> T:
-        return self._chain(type=Category.dog)
-
-    @property
-    def puppies(self: T) -> T:
-        return self._chain(type=Category.dog, age=[Age.baby])
-
-    @property
-    def cats(self: T) -> T:
-        return self._chain(type=Category.cat)
-
-    @property
-    def kittens(self: T) -> T:
-        return self._chain(type=Category.cat, age=[Age.baby])
-
-    @property
-    def small_furry(self: T) -> T:
-        return self._chain(type=Category.small_furry)
-
-    @property
-    def birds(self: T) -> T:
-        return self._chain(type=Category.bird)
-
-    @property
-    def rabbits(self: T) -> T:
-        return self._chain(type=Category.rabbit)
-
-    @property
-    def horses(self: T) -> T:
-        return self._chain(type=Category.horse)
-
-    @property
-    def barnyard(self: T) -> T:
-        return self._chain(type=Category.barnyard)
-
-    @property
-    def scales_fins_other(self: T) -> T:
-        return self._chain(type=Category.scales_fins_other)
 
     def filter(
         self: T,
@@ -233,26 +191,62 @@ class AnimalsQuery(Query[AnimalsResponse]):
         """
         return self.execute()["pagination"]["total_pages"]
 
-    async def search(
-        self, *, format: Format = "records", limit: int = 100, start_page: int = 1,
-    ) -> SearchResults:
+    def search(self, limit: int = 100, start_page: int = 1) -> "SearchResults":
+        """
+        Convenience wrapper for searching synchronously.
+        If you're going to perform multiple searches, you should probably be calling async_search directly.
+        """
+        return asyncio.new_event_loop().run_until_complete(
+            self.async_search(limit=limit, start_page=start_page)
+        )
+
+    async def async_search(
+        self, limit: int = 100, start_page: int = 1
+    ) -> "SearchResults":
         """
         Performs a search asynchronously and formats the results.
         """
         num_pages = ceil(limit / 100)
         queries = [self.page(n).limit(100) for n in range(start_page, num_pages + 1)]
-        results = await self.async_batch_executor(queries)
+        pages = await self.async_batch_executor(queries)
+        return SearchResults(
+            query=self, pages=pages, limit=limit, start_page=start_page
+        )
 
-        if format == "pages":
-            return list(results)
-        elif format == "records":
-            return [record for page in results for record in page["animals"]][:limit]
-        elif format == "pandas":
-            records = [record for page in results for record in page["animals"]][:limit]
-            return PandasResults(
-                animals=animals_dataframe(records),
-                photos=photos_dataframe(records),
-                tags=tags_dataframe(records),
-            )
-        else:
-            raise Exception(f"{format} is not a valid format")
+
+class SearchResults:
+    query: AnimalsQuery
+    pages: Iterable[AnimalsResponse]
+    limit: int
+    start_page: int
+
+    def __init__(
+        self,
+        query: AnimalsQuery,
+        pages: Iterable[AnimalsResponse],
+        limit: int,
+        start_page: int,
+    ) -> None:
+        self.query = query
+        self.pages = pages
+        self.limit = limit
+        self.start_page = start_page
+
+    def __str__(self) -> str:
+        return f"Search results for {self.query}, limit = {self.limit}, start_page = {self.start_page}"
+
+    @property
+    def records(self) -> List[Animal]:
+        return [r for p in self.pages for r in p["animals"]]
+
+    @property
+    def dataframe(self) -> pd.DataFrame:
+        return animals_dataframe(self.records)
+
+    @property
+    def photos_dataframe(self) -> pd.DataFrame:
+        return photos_dataframe(self.records)
+
+    @property
+    def tags_dataframe(self) -> pd.DataFrame:
+        return tags_dataframe(self.records)
