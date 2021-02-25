@@ -25,17 +25,19 @@ install_requires = [
     "typing_extensions",
 ]
 
+description = "High-performance petfinder API client: async support, efficient caching, query validation, and more"
+
 setup(
     name="petfinder-sdk",
     version="0.0.1",
-    description="Petfinder API SDK",
+    description=description,
     license="MIT",
     long_description=readme(),
     long_description_content_type="text/markdown",
     keywords=["async"],
     author="Phillip Dupuis",
     author_email="phillip_dupuis@alumni.brown.edu",
-    url="https://github.com/phillipdupuis/petfinder-client",
+    url="https://github.com/phillipdupuis/petfinder-sdk",
     install_requires=install_requires,
     packages=find_packages(),
     classifiers=classifiers,
