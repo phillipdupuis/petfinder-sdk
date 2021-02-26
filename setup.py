@@ -29,7 +29,7 @@ description = "High-performance petfinder API client: async support, efficient c
 
 setup(
     name="petfinder-sdk",
-    version="0.0.1",
+    version="0.0.2",
     description=description,
     license="MIT",
     long_description=readme(),
@@ -39,6 +39,6 @@ setup(
     author_email="phillip_dupuis@alumni.brown.edu",
     url="https://github.com/phillipdupuis/petfinder-sdk",
     install_requires=install_requires,
-    packages=find_packages(),
+    packages=find_packages(exclude=["scripts"]),
     classifiers=classifiers,
 )

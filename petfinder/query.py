@@ -21,6 +21,7 @@ T = TypeVar("T")
 class QueryParams(BaseModel):
     class Config(BaseModel.Config):
         use_enum_values = True
+        validate_all = True
 
         @staticmethod
         def convert_value_to_query_string(v: Any) -> str:
